@@ -34,6 +34,16 @@ def finish_profile_layout(profile_dir: Path, *, no_skills: bool, clone_all: bool
             "Delete this file to re-enable sync on the next `hermes update`.\n",
         )
 
+    # Seed the built-in MCP servers every new profile starts with (fresh and
+    # clone alike). Additive only: a clone keeps an entry its source already
+    # customised, and an unreadable config is left for the operator to repair.
+    # Runs before the migration below so a migration keeps the seeded entries.
+    # Best-effort: creation must not fail over this.
+    with contextlib.suppress(Exception):
+        from hermes_cli.profiles_builtin_capabilities import seed_profile_config
+
+        seed_profile_config(profile_dir)
+
     # Migrate config-only clones now so desktop/status don't warn that a just-created
     # profile is v0/outdated; --clone-all snapshots stay byte-for-byte apart from the
     # explicit runtime/history stripping above.
