@@ -60,6 +60,21 @@ def recover_left_core_at_gateway_start() -> None:
         recover_left_core_in(root)
 
 
+def ensure_builtin_plugins_at_gateway_start() -> None:
+    """The built-in seed (camofox, advanced-delegation) for the same homes
+    :func:`recover_left_core_at_gateway_start` covers: before the runner loads platform config, so
+    an install lands before discovery. Secondaries go through :func:`recover_builtin_plugins_in`."""
+    from hermes_cli.builtin_plugins_ensure import recover_at_gateway_start
+    recover_at_gateway_start()
+
+
+def recover_builtin_plugins_in(home: Path, *, hydrate_secrets: bool = True) -> None:
+    """Built-in seed install for a secondary profile home, in its runtime scope. Call off the
+    event loop, before the profile's plugins are discovered."""
+    from hermes_cli.builtin_plugins_ensure import recover_in
+    recover_in(home, hydrate_secrets=hydrate_secrets)
+
+
 
 def _own_policy_envs(platform) -> Optional[tuple]:
     """``(dm_policy_env, group_policy_env, allow_all_env)`` for a platform that declares

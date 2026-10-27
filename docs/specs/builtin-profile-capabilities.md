@@ -65,9 +65,12 @@ Manual smoke:  HERMES_HOME=$(mktemp -d) hermes profile create probe --no-alias
 ## Project Structure
 
 ```
-hermes_cli/profiles_builtin_capabilities.py            → NEW. Entry table + pure seed function
+hermes_cli/profiles_builtin_capabilities.py            → NEW. Entry + plugin tables, pure seed functions
+hermes_cli/builtin_plugins_ensure.py                   → NEW. Lazy install of the seeded plugins on first use
 hermes_cli/profiles_initialization.py                  → one call site in finish_profile_layout
+agent/agent_init_startup.py                            → NEW. One pre-discovery recovery call for agent init
 tests/hermes_cli/test_profiles_builtin_capabilities.py → NEW. Seed behaviour, idempotency, validation
+tests/hermes_cli/test_builtin_plugins_ensure.py        → NEW. Install-once, removal-sticks, never-backfill
 ```
 
 ## Code Style
@@ -134,6 +137,42 @@ BUILTIN_MCP_SERVERS = {
 No `enabled` key: `mcp_server_enabled` (`tools/mcp_tool_common.py:140-144`)
 treats an absent key as on, and writing it would pin a value the user then has
 to flip in two places.
+
+### Seeded plugins (camofox, advanced-delegation)
+
+`BUILTIN_PLUGINS = ("camofox", "advanced-delegation")` lives beside the MCP
+table in the same module. `seed_builtin_plugins(config)` selects them by
+appending the missing names to `plugins.enabled` and sets the
+`_builtin_plugins_seeded: true` marker; a name present in `plugins.disabled`
+is **not** re-enabled (the loader lets the deny-list win, so re-adding would
+undo the operator's choice on every clone). No `delegation.backend` is written:
+an unknown backend fails `delegate_task` closed, and the choice belongs to the
+user (`hermes delegation config`).
+
+The seed is selection only — profile creation stays offline. Installing the
+trees is `builtin_plugins_ensure`'s job, on the same trigger surface as the
+left-core migration:
+
+- `hermes update`, for every profile home sharing the venv (grouped dependency
+  answers); wired next to the other migrations in `hermes_cli/source_build.py`.
+- Agent start for the active home (`agent/agent_init_startup.py`, before plugin
+  discovery, so an install lands in the same agent's tool snapshot).
+- Gateway start, launch home plus multiplex primary
+  (`gateway/run_startup.py`), and each served secondary before its plugins are
+  discovered (`gateway/run_adapters.py`).
+
+Per home, a name installs **at most once**: it must still be in
+`plugins.enabled` and absent from the `_builtin_plugins_installed` marker,
+which is written only after the tree exists. So a failed install retries
+(with the memory migration's exponential backoff on agent start), while
+`hermes plugins remove <name>` afterwards sticks forever. Profiles created
+before the seed have no marker and are never backfilled.
+
+Dependency consent is the memory-provider precedent: agent start installs with
+`security.allow_lazy_installs` (nothing can answer a prompt mid-init); a
+terminal `hermes update` still asks, with answers shared across profiles.
+Every outcome reaches the user as a notice naming the exact
+`hermes [-p <profile>] plugins install <name>` command.
 
 ### Call site
 

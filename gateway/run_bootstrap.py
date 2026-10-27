@@ -805,8 +805,9 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     try:
         _start_gateway_configure_logging(verbosity)
 
-        from gateway.run_startup import recover_left_core_at_gateway_start
+        from gateway.run_startup import recover_left_core_at_gateway_start, ensure_builtin_plugins_at_gateway_start
         await asyncio.to_thread(recover_left_core_at_gateway_start)  # before the runner loads platform config
+        await asyncio.to_thread(ensure_builtin_plugins_at_gateway_start)  # same, for the built-in seed
 
         runner = GatewayRunner(resolved_config)
         from gateway.run_runtime import initialize_gateway_runtime

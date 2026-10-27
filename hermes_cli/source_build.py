@@ -231,6 +231,15 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
         migrate_left_core()
     except Exception as exc:  # health: allow BLE001 -- post-commit boundary: printed as ⚠, never fails the committed update; every later update/tail re-runs it
         print(f"  ⚠ Plugin migration skipped: {exc}")
+    # And the plugins every profile created since the built-in seed selects
+    # (camofox, advanced-delegation): install any whose tree never landed
+    # (hermes_cli/builtin_plugins_ensure.py).
+    try:
+        from hermes_cli.builtin_plugins_ensure import migrate_all_homes as ensure_builtin_plugins
+
+        ensure_builtin_plugins()
+    except Exception as exc:  # health: allow BLE001 -- post-commit boundary: printed as ⚠, never fails the committed update; every later update/tail re-runs it
+        print(f"  ⚠ Built-in plugin install skipped: {exc}")
     if failures:
         raise ProductBuildError(failures)
 

@@ -15,7 +15,10 @@ from hermes_cli.mcp_security import validate_mcp_server_entry
 from hermes_cli.profiles import create_profile
 from hermes_cli.profiles_builtin_capabilities import (
     BUILTIN_MCP_SERVERS,
+    BUILTIN_PLUGINS,
+    SEEDED_KEY,
     seed_builtin_capabilities,
+    seed_builtin_plugins,
 )
 
 
@@ -93,6 +96,60 @@ class TestSeededEntriesValidate:
 
 
 # ---------------------------------------------------------------------------
+# Plugin selection: a new profile SELECTS the built-in plugins at creation
+# (offline); installing their trees is builtin_plugins_ensure's job.
+# ---------------------------------------------------------------------------
+
+class TestSeedBuiltinPlugins:
+    def test_empty_config_selects_every_plugin_and_marks_the_home(self):
+        config: dict = {}
+        added = seed_builtin_plugins(config)
+        assert added == list(BUILTIN_PLUGINS)
+        assert config["plugins"]["enabled"] == list(BUILTIN_PLUGINS)
+        assert config[SEEDED_KEY] is True
+
+    def test_idempotent(self):
+        config: dict = {}
+        seed_builtin_plugins(config)
+        snapshot = copy.deepcopy(config)
+        assert seed_builtin_plugins(config) == []
+        assert config == snapshot
+
+    def test_existing_selection_kept_in_order_and_appended_to(self):
+        config: dict = {"plugins": {"enabled": ["my-plugin"]}}
+        added = seed_builtin_plugins(config)
+        assert added == list(BUILTIN_PLUGINS)
+        assert config["plugins"]["enabled"] == ["my-plugin", *BUILTIN_PLUGINS]
+
+    def test_a_disabled_name_is_not_re_enabled(self):
+        # The loader lets the deny-list win; re-adding here would silently undo
+        # the operator's choice on every clone of that profile.
+        config: dict = {"plugins": {"enabled": [], "disabled": ["camofox"]}}
+        added = seed_builtin_plugins(config)
+        assert added == ["advanced-delegation"]
+        assert config["plugins"]["enabled"] == ["advanced-delegation"]
+        assert config["plugins"]["disabled"] == ["camofox"]
+
+    def test_writes_no_delegation_backend(self):
+        # A backend whose plugin is not registered yet fails delegate_task
+        # closed, so the seed must leave the choice to the user.
+        config: dict = {}
+        seed_builtin_plugins(config)
+        assert "delegation" not in config
+
+    def test_non_dict_plugins_replaced(self):
+        config: dict = {"plugins": ["camofox"]}
+        added = seed_builtin_plugins(config)
+        assert added == list(BUILTIN_PLUGINS)
+        assert config["plugins"]["enabled"] == list(BUILTIN_PLUGINS)
+
+    def test_other_config_keys_untouched(self):
+        config: dict = {"model": {"default": "x"}}
+        seed_builtin_plugins(config)
+        assert config["model"] == {"default": "x"}
+
+
+# ---------------------------------------------------------------------------
 # Profile creation: the seed must land in every new profile, verbatim from the
 # module table, without disturbing anything else the profile carries.
 # ---------------------------------------------------------------------------
@@ -111,6 +168,8 @@ class TestCreateProfileSeedsBuiltins:
         profile_dir = create_profile("probe", no_alias=True)
         cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8-sig"))
         assert cfg["mcp_servers"] == BUILTIN_MCP_SERVERS
+        assert cfg["plugins"]["enabled"] == list(BUILTIN_PLUGINS)
+        assert cfg[SEEDED_KEY] is True
 
     def test_fresh_profile_keeps_its_inherited_model(self, profile_env):
         (profile_env / ".hermes" / "config.yaml").write_text(
@@ -120,12 +179,25 @@ class TestCreateProfileSeedsBuiltins:
         cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8-sig"))
         assert cfg["model"] == {"provider": "nous", "default": "some/model"}
         assert cfg["mcp_servers"] == BUILTIN_MCP_SERVERS
+        assert cfg["plugins"]["enabled"] == list(BUILTIN_PLUGINS)
 
     def test_clone_from_source_without_entries_still_gets_them(self, profile_env):
         (profile_env / ".hermes" / "config.yaml").write_text("model: test\n", encoding="utf-8")
         profile_dir = create_profile("probe", clone_config=True, no_alias=True)
         cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8-sig"))
         assert cfg["mcp_servers"] == BUILTIN_MCP_SERVERS
+        assert cfg["plugins"]["enabled"] == list(BUILTIN_PLUGINS)
+        assert cfg[SEEDED_KEY] is True
+
+    def test_clone_keeps_a_disabled_plugin_disabled(self, profile_env):
+        # The deny-list wins in the loader, so the seed must not re-enable it.
+        (profile_env / ".hermes" / "config.yaml").write_text(
+            "plugins:\n  enabled: []\n  disabled: [camofox]\n", encoding="utf-8"
+        )
+        profile_dir = create_profile("probe", clone_config=True, no_alias=True)
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8-sig"))
+        assert cfg["plugins"]["disabled"] == ["camofox"]
+        assert cfg["plugins"]["enabled"] == ["advanced-delegation"]
 
     def test_clone_keeps_a_customised_entry_verbatim(self, profile_env):
         (profile_env / ".hermes" / "config.yaml").write_text(
